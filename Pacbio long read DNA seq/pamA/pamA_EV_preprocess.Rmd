@@ -1,0 +1,160 @@
+---
+title: "RU121_vs_129"
+author: "Peien"
+date: "2024-02-20"
+output: html_document
+---
+```{r}
+library("BioCircos")
+library(vcfR)
+library(ggplot2)
+library(data.table)
+library(dplyr)
+library(tidyr)
+library(ComplexHeatmap)
+library(matrixStats)
+library(ggpubr)
+set.seed(1234)
+library(seriation)
+library("gridExtra")
+```
+
+
+
+```{r}
+read_methy <- function(file, type){
+  df <- read.table(file, sep="\t", quote="")
+  df <- df[df$V3==type,] 
+  df <- df %>%
+    mutate_at(vars(9), list(~gsub("coverage=|context=|IPDRatio=|identificationQv=", "", .)))
+
+  # Split the modified 9th column into multiple columns
+  df <- separate(df, col=9, into=c("coverage", "context", "IPDRatio", "identificationQv"), sep=";")
+  
+  # Convert the new columns to numeric where applicable
+  # Note: 'context' might not be converted to numeric if it is a non-numeric string
+  df <- df %>%
+    mutate(across(c(coverage, IPDRatio, identificationQv), as.numeric))
+  
+  colnames(df)[1:8] <- c("seqid","source","type","start","end","score","strand","phase")
+  return(df)
+}
+
+pamA_m4C <- read_methy("/Users/peien/NYU Langone Health Dropbox/Peien Jiang/121_v_129_for_Itai/20230310_PacBio_RU121_LAC-pamA/RU121_basemods.gff", type="m4C")
+pamA_m6A <- read_methy("/Users/peien/NYU Langone Health Dropbox/Peien Jiang/121_v_129_for_Itai/20230310_PacBio_RU121_LAC-pamA/RU121_basemods.gff", type="m6A")
+EV_m4C <- read_methy("/Users/peien/NYU Langone Health Dropbox/Peien Jiang/121_v_129_for_Itai/20230310_PacBio_RU129_LAC-EV/RU129_basemods.gff", type="m4C")
+EV_m6A <- read_methy("/Users/peien/NYU Langone Health Dropbox/Peien Jiang/121_v_129_for_Itai/20230310_PacBio_RU129_LAC-EV/RU129_basemods.gff", type="m6A")
+```
+
+Only look at the main chromosome
+```{r}
+pamA_m4C <- pamA_m4C %>%
+  filter(seqid=='ctg.s1.000000F')
+pamA_m6A <- pamA_m6A %>%
+  filter(seqid=='ctg.s1.000000F')
+EV_m4C <- EV_m4C %>%
+  filter(seqid=='ctg.s1.000000F')
+EV_m6A <- EV_m6A %>%
+  filter(seqid=='ctg.s1.000000F')
+```
+
+scatter plot to show the correlation among ipd, coverage
+```{r}
+ggplot(pamA_m4C, aes(x=coverage, y=IPDRatio))+
+  geom_point(alpha=0.3)+
+  theme_classic()
+ggplot(pamA_m6A, aes(x=coverage, y=IPDRatio))+
+  geom_point(alpha=0.3)+
+  theme_classic()
+ggplot(EV_m4C, aes(x=coverage, y=IPDRatio))+
+  geom_point(alpha=0.3)+
+  theme_classic()
+ggplot(EV_m6A, aes(x=coverage, y=IPDRatio))+
+  geom_point(alpha=0.3)+
+  theme_classic()
+```
+
+```{r}
+ggplot(pamA_m6A, aes(x=start, y=coverage))+
+  geom_point(alpha=0.3)+
+  theme_classic()
+ggplot(EV_m6A, aes(x=start, y=coverage))+
+  geom_point(alpha=0.3)+
+  theme_classic()
+```
+Manipulate the coordinate position. 
+1. Reverse compliment the Pacbio whole genome assembly
+2. rotate the new assembly
+3. call the gene annotation
+
+pamA: FASTA=RU121_polished_assembly_RC.fasta contig=ctg.s1.000000F length=2867511 p=583 desired=3697 restart_i=2864398
+```{r}
+# map raw coordinate x -> after reverse-complement + rotation
+map_coord <- function(x, L, i) {
+  x_rc  <- L - x + 1
+  x_new <- x_rc - i + 1
+  x_new <- ifelse(x_new < 1, x_new + L, x_new)
+  x_new
+}
+
+pamA_m6A$coord <- map_coord(pamA_m6A$start, L=2867511, i=2864398)
+pamA_m4C$coord <- map_coord(pamA_m4C$start, L=2867511, i=2864398)
+
+pamA_m6A$dir_new <- ifelse(pamA_m6A$strand == "+", "-",
+                     ifelse(pamA_m6A$strand == "-", "+", pamA_m6A$strand))
+pamA_m4C$dir_new <- ifelse(pamA_m4C$strand == "+", "-",
+                     ifelse(pamA_m4C$strand == "-", "+", pamA_m4C$strand))
+```
+EV: FASTA=RU129_polished_assembly_RC.fasta  contig=ctg.s1.000000F  length=2866820  p=3102  desired=3697  restart_i=2866226
+```{r}
+EV_m6A$coord <- map_coord(EV_m6A$start, L=2866820, i=2866226)
+EV_m4C$coord <- map_coord(EV_m4C$start, L=2866820, i=2866226)
+
+EV_m6A$dir_new <- ifelse(EV_m6A$strand == "+", "-",
+                     ifelse(EV_m6A$strand == "-", "+", EV_m6A$strand))
+EV_m4C$dir_new <- ifelse(EV_m4C$strand == "+", "-",
+                     ifelse(EV_m4C$strand == "-", "+", EV_m4C$strand))
+```
+
+```{r}
+write.csv(pamA_m4C,'pamA_m4C_raw.csv')
+write.csv(pamA_m6A,'pamA_m6A_raw.csv')
+write.csv(EV_m4C,'EV_m4C_raw.csv')
+write.csv(EV_m6A,'EV_m6A_raw.csv')
+```
+
+Load gene annotation files:
+ID=SAUSA300_RS00015;coverage=0.821;sequence_ID=0.821;extra
+_copy_number=0;copy_num_ID=SAUSA300_RS00015_0
+```{r}
+read_annotation <- function(file){
+  df <- read.table(file, sep="\t", quote="")
+  df <- df %>%
+    mutate_at(vars(9), list(~gsub("ID=|coverage=|sequence_ID=|extra_copy_number=|copy_num_ID=", "", .)))
+
+  # Split the modified 9th column into multiple columns
+  df <- separate(df, col=9, into=c("ID",'coverage','sequence_ID','extra_copy_number','copy_num_ID'), sep=";")
+  
+  colnames(df)[1:8] <- c("seqid","source","type","start","end","score","strand","phase")
+  return(df)
+}
+
+pamA_gff <- read_annotation("/Users/peien/NYU Langone Health Dropbox/Peien Jiang/121_v_129_for_Itai/RU121_roated_3017gene.gff")
+```
+
+grep "RS04315" RU121_roated_3017gene.gff 
+ctg.s1.000000F  Liftoff gene    897426  897637  .       -       .       ID=SAUSA300_RS04315;coverage=0.173;sequence_ID=0.171;extra
+_copy_number=0;copy_num_ID=SAUSA300_RS04315_0;partial_mapping=True;low_identity=True
+(base) [pj2062@bigpurple-ln3 pamA_pacbio]$ grep "RS03280" RU121_roated_3017gene.gff 
+ctg.s1.000000F  Liftoff gene    700319  700378  .       +       .       ID=SAUSA300_RS03280;coverage=0.140;sequence_ID=0.140;extra
+_copy_number=0;copy_num_ID=SAUSA300_RS03280_0;partial_mapping=True;low_identity=True
+
+```{r}
+EV_gff <- read_annotation("/Users/peien/NYU Langone Health Dropbox/Peien Jiang/121_v_129_for_Itai/RU129_roated_3017gene.gff")
+
+```
+```{r}
+write.csv(pamA_gff,"pamA_gff.csv")
+write.csv(EV_gff,"EV_gff.csv")
+```
+
