@@ -1,0 +1,171 @@
+---
+title: "corrected"
+author: "Peien"
+date: "2023-11-27"
+output: html_document
+---
+
+```{r}
+library(clusterProfiler)
+library(enrichplot)
+library(data.table)
+library(fgsea)
+library(ggplot2)
+library(stringr)
+library(tibble)
+library(factoextra)
+library(corrplot)
+#install.packages("clusterProfiler")
+library(ggpubr)
+library(ComplexHeatmap)
+library(magrittr) # needed to load the pipe function '%%'
+set.seed(1234)
+library(circlize)
+library(UCell)
+library(rstatix)
+require(gridExtra)
+```
+
+```{r}
+target <- read.csv("/Intensity.corrected.values.csv", header=TRUE, row.names=1)
+target <- target[rowSums(target == 0) == 0, ] #drop the rows which contain 0.
+target_log <- log2(target)
+hist(colSums(target))
+
+```
+```{r}
+hist(colMeans(target_log))
+```
+```{r}
+# Function to standardize each row
+standardize_row <- function(row) {
+  mean_row <- mean(row)
+  sd_row <- sd(row)
+  (row - mean_row) / sd_row
+}
+
+# Apply the standardization function to each row
+target_z <- t(apply(target_log, 1, standardize_row))
+
+hist(rowMeans(target_z))
+sd(target_z)
+```
+
+PCA
+```{r}
+target.pca <- prcomp(t(target_z))
+saveRDS(target.pca, "target_230_log_z_pca.RData")
+saveRDS(target.pca, "target_230_log_z_pca.rds")
+```
+
+Scatter plots
+```{r}
+plot_pcs <- function(data, x, output_file, ...) {
+  # Open the PDF device
+  pdf(output_file, width = 7, height = 7)
+  # Loop through the pairs of PCs
+  for (i in 1:(x-1)) {
+    # Define the names of the PCs to plot
+    x_name <- paste0("PC", i)
+    y_name <- paste0("PC", i + 1)
+    # Draw and print the scatter plot directly to the PDF device
+    ggscatterhist(
+      data, x = x_name, y = y_name,
+      color = "sample", size = 5, alpha = 0.7,
+      palette = c("#F2D6B4","#F29090", "#00AFBB", "#B9C0EA","#00008b"),
+      margin.params = list(fill = "sample", size = 0.2),
+      ...
+    )
+  }
+  dev.off()
+}
+
+fviz_eig(target.pca)
+```
+```{r}
+fviz_pca_ind(target.pca,)
+
+```
+
+
+```{r}
+target_scores <- as.data.frame(target.pca$x[,1:10])
+target_scores$sample <- gsub("\\D", "", rownames(target_scores))
+target_scores$sample <- paste0("D",target_scores$sample)
+plot_pcs(target_scores, 10, "target_PCA_ggscatterhist.pdf")
+
+fviz_pca_var(target.pca,
+             col.var = "contrib", # Color by contributions to the PC
+             select.var = list(cos2 = 20), # Select the top 20 contributing variables
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+             repel = TRUE     # Avoid text overlapping
+             )
+```
+```{r}
+pdf("PCA_scatter.pdf", width=5, height=4)
+ggscatter(target_scores,
+          x="PC1", y="PC2",
+          color="sample", palette = c("#F2D6B4","#F29090", "#00AFBB", "#B9C0EA","#00008b"),
+          legend="right")
+dev.off()
+```
+
+
+Use scatter plots to visualze the correlation between metabolites and time.
+```{r}
+target_t <- as.data.frame(t(target))
+target_t$sample <- paste0("D", gsub("\\D", "", rownames(target_t)))
+target_t$time<- as.numeric(gsub("\\D", "", rownames(target_t)))
+
+pdf("AICAR.pdf", width=5, height=5)
+ggscatter(target_t,
+          x="time",
+          y="292         AICAR",
+          xlab="time", ylab="AICAR",
+          color="sample", palette = c("#F2D6B4","#F29090", "#00AFBB", "#B9C0EA","#00008b"), 
+          add = "reg.line",conf.int = TRUE, add.params = list(color = "#4a7ba6", fill = "lightgray"))+
+  stat_cor(method="spearman")
+dev.off()
+```
+Adenine
+```{r}
+pdf("adenine.pdf", width=5, height=5)
+ggscatter(target_t,
+          x="time",
+          y="17         Adenine",
+          xlab="time", ylab="adenine",
+          color="sample", palette = c("#F2D6B4","#F29090", "#00AFBB", "#B9C0EA","#00008b"), 
+          add = "reg.line",conf.int = TRUE, add.params = list(color = "#4a7ba6", fill = "lightgray"))+
+  stat_cor(method="spearman")
+dev.off()
+```
+
+Guanine
+```{r}
+pdf("guanine.pdf", width=5, height=5)
+ggscatter(target_t,
+          x="time",
+          y="13         Guanine",
+          xlab="time", ylab="guanine",
+          color="sample", palette = c("#F2D6B4","#F29090", "#00AFBB", "#B9C0EA","#00008b"), 
+          add = "reg.line",conf.int = TRUE, add.params = list(color = "#4a7ba6", fill = "lightgray"))+
+  stat_cor(method="spearman")
+dev.off()
+```
+
+
+```{r}
+
+target_scores$time <- target_t$time
+
+pdf("PC1.pdf", height=4, width=5)
+ggscatter(target_scores,
+          x="time",
+          y="PC1",
+          #xlab="time", ylab="AICAR",
+          rug=FALSE, legend="right",
+          color="sample", palette = c("#F2D6B4","#F29090", "#00AFBB", "#B9C0EA","#00008b"),
+          add = "reg.line",conf.int = TRUE, add.params = list(color = "#4a7ba6", fill = "lightgray"))+
+  stat_cor(method="spearman")
+dev.off()
+```
